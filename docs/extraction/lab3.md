@@ -1,9 +1,8 @@
-### 6. Extraction Data Contract and Naming Convention
-*   *Required Schema & Naming Convention:* The extracted data will perfectly mirror the source schema using snake_case naming conventions for all columns (e.g., date_measured, age_in_months, hfa_status). 
-*   *Schema Consistency:* Because both the Source and Destination share the exact same database platform (WeighToGo Supabase/PostgreSQL), extraction mappings are strictly 1:1. 
-
-| Source Column | Standardized Column | Source Type | Target Type | Mapping Type |
-| :--- | :--- | :--- | :--- | :--- |
-| child_id | child_id | uuid | uuid | 1:1 Pass-through |
-| date_measured | date_measured | date | date | 1:1 Pass-through |
-| age_in_months | age_in_months | integer | integer | 1:1 Pass-through |
+### 7. Extraction Acceptance and Handover Rules
+*   *Automatic Approval:* If Python successfully connects to Supabase/PostgreSQL and the extracted record counts match the source batch counts without any missing identifiers, the data is *APPROVED*.
+    *   Pipeline Action: Python automatically proceeds to the "Initial Load" step, inserting this raw data into temporary staging tables inside Supabase PostgreSQL.
+*   *Manual Review:* If the selected monthly processing period yields 0 records for a specific barangay.
+    *   Pipeline Action: Hold pipeline execution and flag the Municipal Nutrition Action Officers (MNAO) to verify if the BNS missed their data entry window.
+*   *Rejection or Failure:* If the Python script fails to authenticate with Supabase/PostgreSQL.
+    *   Pipeline Action: Stop the pipeline and log a critical failure.
+*   *Handover:* Extracted raw health data records are staged in PostgreSQL for the subsequent Data Validation step.

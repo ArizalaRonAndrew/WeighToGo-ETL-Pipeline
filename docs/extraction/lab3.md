@@ -1,8 +1,9 @@
-### 7. Extraction Acceptance and Handover Rules
-*   *Automatic Approval:* If Python successfully connects to Supabase/PostgreSQL and the extracted record counts match the source batch counts without any missing identifiers, the data is *APPROVED*.
-    *   Pipeline Action: Python automatically proceeds to the "Initial Load" step, inserting this raw data into temporary staging tables inside Supabase PostgreSQL.
-*   *Manual Review:* If the selected monthly processing period yields 0 records for a specific barangay.
-    *   Pipeline Action: Hold pipeline execution and flag the Municipal Nutrition Action Officers (MNAO) to verify if the BNS missed their data entry window.
-*   *Rejection or Failure:* If the Python script fails to authenticate with Supabase/PostgreSQL.
-    *   Pipeline Action: Stop the pipeline and log a critical failure.
-*   *Handover:* Extracted raw health data records are staged in PostgreSQL for the subsequent Data Validation step.
+### 8. Common Extraction Problems and Mitigation
+*   *Problem:* Missing Dependency Data.
+    *   *Description:* The Python Scheduler triggers the pipeline, but the BNS have not yet submitted the barangay health data entries for that month.
+    *   *Impact:* The extraction yields an empty dataset, causing downstream dashboards and reports to show blanks for the month.
+    *   *Mitigation:* Implement a pre-extraction dependency check in Python to verify that data entries for the target month exist before initiating the full extraction script.
+*   *Problem:* Network Interruption during Extraction.
+    *   *Description:* Python loses connection to the Supabase/PostgreSQL database mid-extraction.
+    *   *Impact:* Partial data is loaded into memory, failing the completeness validation check.
+    *   *Mitigation:* The Python Scheduler will automatically discard the incomplete memory dictionary, log a connection error, and retry the extraction batch based on a predefined retry interval.

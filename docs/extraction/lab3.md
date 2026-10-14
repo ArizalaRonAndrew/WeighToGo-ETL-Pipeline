@@ -1,21 +1,15 @@
-### 2. Source Tables and Column Specification
-The extraction focuses on three primary operational tables from the Supabase/PostgreSQL database.
+### 3. Extraction Validation and Data Quality Checks
+These checks verify the extraction's success before Python inserts the raw data into temporary staging tables inside Supabase PostgreSQL.
 
-*Table 1: children*
-*   *Purpose:* Stores child demographic profiles.
-*   *Key Columns & Types:* id (uuid), name (text), dob (date), barangay (text), purok (text), gender (text).
-*   *Identifiers:* Primary Key is id.
-*   *Relationships:* Referenced by assessment.child_id and supplements.child_id.
-*   *Reason for Inclusion:* Required for verifying child demographic profiles and grouping metrics geographically by barangay.
-
-*Table 2: assessment*
-*   *Purpose:* Records child anthropometric assessments.
-*   *Key Columns & Types:* id (uuid), child_id (uuid), date_measured (date), weight (numeric), height (numeric), age_in_months (integer), hfa_status (text), wfa_status (text), wfl_h_status (text).
-*   *Identifiers:* Primary Key is id. Foreign Key child_id references children.id.
-*   *Reason for Inclusion:* Provides the raw measurement data needed to compute WHO z-scores, evaluate nutritional statuses, and aggregate malnutrition summaries.
-
-*Table 3: supplements*
-*   *Purpose:* Logs vitamin and deworming supplement distributions.
-*   *Key Columns & Types:* id (uuid), child_id (uuid), supplement_type (text), dose_order (integer), age_in_months (integer), date_administered (date).
-*   *Identifiers:* Primary Key is id. Foreign Key child_id references children.id.
-*   *Reason for Inclusion:* Essential for tracking vitamin and deworming compliance.
+*   *Check 1: Source Connection Accessibility*
+    *   *Target:* Supabase/PostgreSQL Database.
+    *   *Purpose:* Ensure the Python script can successfully connect to the operational source.
+    *   *Validation Criteria:* A successful connection and authentication response from the database prior to executing extraction queries.
+*   *Check 2: Record Count Completeness*
+    *   *Target:* children, assessment, and supplements batch extraction results.
+    *   *Purpose:* Verify that all records for the selected monthly processing period were extracted.
+    *   *Validation Criteria:* The total count of extracted dictionaries in Python memory must match the COUNT() query result of the target batch in PostgreSQL.
+*   *Check 3: Required Identifiers Check*
+    *   *Target:* id and child_id columns across extracted datasets.
+    *   *Purpose:* Ensure relational integrity is maintained during the extraction into memory.
+    *   *Validation Criteria:* 0 NULL values in Primary Key (id) and Foreign Key (child_id) fields.

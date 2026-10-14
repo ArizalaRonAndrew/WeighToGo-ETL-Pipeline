@@ -1,15 +1,12 @@
-### 3. Extraction Validation and Data Quality Checks
-These checks verify the extraction's success before Python inserts the raw data into temporary staging tables inside Supabase PostgreSQL.
+### 4. Extraction Metadata and Log Specification
+To monitor the monthly batch processing managed by the Python Scheduler, the following metadata will be logged:
 
-*   *Check 1: Source Connection Accessibility*
-    *   *Target:* Supabase/PostgreSQL Database.
-    *   *Purpose:* Ensure the Python script can successfully connect to the operational source.
-    *   *Validation Criteria:* A successful connection and authentication response from the database prior to executing extraction queries.
-*   *Check 2: Record Count Completeness*
-    *   *Target:* children, assessment, and supplements batch extraction results.
-    *   *Purpose:* Verify that all records for the selected monthly processing period were extracted.
-    *   *Validation Criteria:* The total count of extracted dictionaries in Python memory must match the COUNT() query result of the target batch in PostgreSQL.
-*   *Check 3: Required Identifiers Check*
-    *   *Target:* id and child_id columns across extracted datasets.
-    *   *Purpose:* Ensure relational integrity is maintained during the extraction into memory.
-    *   *Validation Criteria:* 0 NULL values in Primary Key (id) and Foreign Key (child_id) fields.
+| Field | Purpose | Example Value |
+| :--- | :--- | :--- |
+| *Pipeline Run ID* | Unique identifier for the batch execution | batch_run_20261014_01 |
+| *Target Period* | The selected monthly processing period | October 2026 |
+| *Table Name* | Identifies which dataset is being extracted | assessment |
+| *Extraction Start/End* | Timestamps to monitor extraction duration | 2026-10-14 13:47:00 |
+| *Extraction Status* | Indicates success or failure of the stage | SUCCESS |
+| *Records Extracted* | Number of raw records loaded into Python memory | 1,250 |
+| *Error Message* | Captures failure reasons | Connection timeout to Supabase |

@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
+import requests
 from extraction.extractor import ExtractionService
 
 class TestExtractionService(unittest.TestCase):
@@ -19,7 +20,7 @@ class TestExtractionService(unittest.TestCase):
 
     @patch('extraction.extractor.requests.get')
     def test_extract_data_failure(self, mock_get):
-        mock_get.side_effect = Exception("Connection error")
+        mock_get.side_effect = requests.exceptions.RequestException("Connection error")
         result = self.service.extract_data("weights")
         self.assertIsNone(result)
 

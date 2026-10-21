@@ -1,107 +1,54 @@
-# GitHub Issues Automation Prompt
+# OpenCode Prompt: Automated GitHub Issues Creation
 
-This prompt and guide instruct you on how to automatically create GitHub Issues from your `github-issues.md` file using the GitHub CLI (`gh`).
-
----
-
-## Prerequisites
-1. Ensure you have the **GitHub CLI** installed and authenticated:
-   ```bash
-   gh auth status
-   ```
-   *(If not authenticated, run `gh auth login`)*
-2. Ensure you are inside your local repository directory containing `github-issues.md`.
+Copy and use this prompt in OpenCode or any AI coding assistant to automatically generate and push GitHub issues using the GitHub CLI (`gh`), compatible across all platforms (macOS, Linux, and Windows PowerShell/Git Bash).
 
 ---
 
-## Automated Script (Bash)
+## The Prompt to Copy & Paste
 
-Run the following bash script in your terminal to parse `github-issues.md` and automatically create GitHub issues with appropriate titles, descriptions, and labels for Days 1 through 7:
+```markdown
+You are an expert automation engineer and developer. Your task is to read the `github-issues.md` file in the current repository, parse the 7-day roadmap, and automatically create GitHub issues for each day (Day 1 through Day 7) using the GitHub CLI (`gh`).
 
-```bash
-#!/bin/bash
-
-# Ensure github-issues.md exists
-if [ ! -f "github-issues.md" ]; then
-  echo "github-issues.md not found!"
-  exit 1
-fi
-
-# Use awk to parse Day headers and tasks, then create GitHub issues using gh CLI
-awk '
-/^## Day [0-9]+:/ {
-  if (title != "") {
-    print title "|" body
-  }
-  title = $0
-  sub(/^## /, "", title)
-  body = ""
-  next
-}
-{
-  if (title != "") {
-    body = body $0 "\n"
-  }
-}
-END {
-  if (title != "") {
-    print title "|" body
-  }
-}
-' github-issues.md | while IFS="|" read -r issue_title issue_body; do
-  echo "Creating issue: $issue_title"
-  gh issue create --title "$issue_title" --body "$issue_body" --label "roadmap,etl"
-done
-
-echo "All GitHub issues created successfully!"
+### Instructions:
+1. Check that the GitHub CLI is installed and authenticated (`gh auth status`). If not authenticated, prompt the user to run `gh auth login`.
+2. Parse `github-issues.md` to extract each Day's title and its corresponding task checklist items.
+3. For each day, create a GitHub issue using `gh issue create` with:
+   - **Title**: The Day title (e.g., `Day 1: Project Setup & Environment Configuration`)
+   - **Body**: The task checklist items under that day.
+   - **Labels**: Add labels like `roadmap` or `etl`.
+4. Handle cross-platform compatibility (works on Bash/Zsh on Linux/macOS and PowerShell/Git Bash on Windows).
+5. Output a success message with links or titles of all created issues once finished.
 ```
 
 ---
 
-## Manual `gh` Commands
+## Cross-Platform Execution Script (Reference for Assistant / Shell)
 
-If you prefer creating them one by one using the GitHub CLI:
+If you need the assistant or script to run directly across platforms, use this robust Node.js or Python snippet, or platform-agnostic shell approach:
 
-```bash
-gh issue create --title "Day 1: Project Setup & Environment Configuration" --body "$(cat <<'EOF'
-- [ ] Initialize Repository & Project Structure
-- [ ] Define Data Schemas & Sources
-EOF
-)" --label "roadmap"
+### Node.js Script (`create-issues.js`)
+If Node.js is available across platforms, run `node create-issues.js`:
 
-gh issue create --title "Day 2: Extraction Phase Implementation" --body "$(cat <<'EOF'
-- [ ] Develop Raw Data Extractors (`extraction/extractor.py`)
-- [ ] Write Extraction Unit Tests (`extraction/test_extractor.py`)
-EOF
-)" --label "roadmap"
+```javascript
+const { execSync } = require('child_process');
+const fs = require('fs');
 
-gh issue create --title "Day 3: Transformation Phase & Business Logic" --body "$(cat <<'EOF'
-- [ ] Build Data Cleaning & Transformation Scripts
-- [ ] Validate Transformed Data
-EOF
-)" --label "roadmap"
+try {
+  const content = fs.readFileSync('github-issues.md', 'utf8');
+  const days = content.split(/^## /m).slice(1);
 
-gh issue create --title "Day 4: Loading Phase & Storage Integration" --body "$(cat <<'EOF'
-- [ ] Implement Target Loader (`pipelines/extractor.py` / loader modules)
-- [ ] End-to-End Pipeline Integration (`pipelines/lab3.py`)
-EOF
-)" --label "roadmap"
+  for (const dayBlock of days) {
+    const lines = dayBlock.trim().split('\n');
+    const title = lines[0].trim();
+    const body = lines.slice(1).join('\n').trim();
 
-gh issue create --title "Day 5: Error Handling, Logging & Monitoring" --body "$(cat <<'EOF'
-- [ ] Implement Structured Logging
-- [ ] Add Exception Handling & Retries
-EOF
-)" --label "roadmap"
-
-gh issue create --title "Day 6: Automation & Scheduling" --body "$(cat <<'EOF'
-- [ ] Configure Cron / Airflow / GitHub Actions
-- [ ] Environment Secret Management
-EOF
-)" --label "roadmap"
-
-gh issue create --title "Day 7: Documentation, Polish & Final Review" --body "$(cat <<'EOF'
-- [ ] Complete System Documentation (`docs/`)
-- [ ] Final Code Cleanup & End-to-End Dry Run
-EOF
-)" --label "roadmap"
+    console.log(`Creating issue: ${title}`);
+    const command = `gh issue create --title ${JSON.stringify(title)} --body ${JSON.stringify(body)} --label "roadmap,etl"`;
+    execSync(command, { stdio: 'inherit' });
+  }
+  console.log('All issues created successfully!');
+} catch (err) {
+  console.error('Error creating issues:', err.message);
+  process.exit(1);
+}
 ```

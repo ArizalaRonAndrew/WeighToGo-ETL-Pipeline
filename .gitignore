@@ -1,0 +1,26 @@
+# Local environment and secrets
+.env
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Pipeline output
+logs/
+data/
+*.db
+*.sqlite3
+
+# Editor/OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

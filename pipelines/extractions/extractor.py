@@ -1,6 +1,10 @@
-import os
 import logging
-from typing import Dict, Any, List, Optional
+import os
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -8,73 +12,224 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_PAGE_SIZE = 1000
+_CHILD_ID_BATCH_SIZE = 100
+_SOURCE_TABLES = {
+    "children": ("tbl_children", None),
+    "assessment": ("tbl_assessments", "date_measured"),
+    "supplements": ("tbl_supplements", "date_administered"),
+}
+
+
+def _load_project_env() -> None:
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.is_file():
+        return
+
+    for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if name and value:
+            os.environ.setdefault(name, value)
+
+
+def _month_bounds(period: str) -> tuple[date, date]:
+    for date_format in ("%B %Y", "%Y-%m"):
+        try:
+            month = datetime.strptime(period, date_format).date().replace(day=1)
+            break
+        except ValueError:
+            continue
+    else:
+        raise ValueError("period must be formatted as 'Month YYYY' or 'YYYY-MM'")
+
+    if month.month == 12:
+        next_month = date(month.year + 1, 1, 1)
+    else:
+        next_month = date(month.year, month.month + 1, 1)
+    return month, next_month
+
+
 class WeighToGoExtractor:
-    """
-    Extracted data module for WeighToGo-ETL-Pipeline adhering to Lab 3 specifications.
-    Connects to Supabase / PostgreSQL database or simulates extraction for children,
-    assessment, and supplements tables.
-    """
-    def __init__(self, connection_string: Optional[str] = None):
-        self.connection_string = connection_string or os.getenv("SUPABASE_DB_URL")
+    """Extract monthly child health records from Supabase via its REST API."""
+
+    def __init__(
+        self,
+        supabase_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        timeout: float = 30,
+    ):
+        _load_project_env()
+        self.supabase_url = (
+            supabase_url or os.getenv("SUPABASE_URL")
+        )
+        self.api_key = api_key or os.getenv("SUPABASE_ANON_KEY")
+        self.timeout = timeout
+
+    @property
+    def rest_url(self) -> str:
+        if not self.supabase_url or not self.api_key:
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_ANON_KEY must be configured "
+                "in the environment or project .env file"
+            )
+        return f"{self.supabase_url.rstrip('/')}/rest/v1"
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        if not self.api_key:
+            raise RuntimeError(
+                "SUPABASE_ANON_KEY must be configured in the environment "
+                "or project .env file"
+            )
+        return {
+            "apikey": self.api_key,
+            "Authorization": f"Bearer {self.api_key}",
+        }
 
     def connect(self) -> bool:
-        """
-        Check 1: Source Connection Accessibility
-        Validates connection to the database.
-        """
-        if not self.connection_string:
-            logger.warning("SUPABASE_DB_URL not set. Operating in mock/offline mode.")
+        """Check that the configured key can read the source tables."""
+        try:
+            requests.get(
+                f"{self.rest_url}/{_SOURCE_TABLES['children'][0]}",
+                headers=self.headers,
+                params={"select": "id", "limit": 1},
+                timeout=self.timeout,
+            ).raise_for_status()
+        except RuntimeError as error:
+            logger.error("Supabase configuration is incomplete: %s", error)
             return False
-        logger.info("Successfully connected to Supabase/PostgreSQL source database.")
+        except requests.exceptions.RequestException as error:
+            logger.error("Supabase connection check failed: %s", error)
+            return False
+
+        logger.info("Successfully connected to the Supabase REST API.")
         return True
 
-    def extract_batch(self, table_name: str, period: str) -> List[Dict[str, Any]]:
-        """
-        Extracts raw child profiles, anthropometric assessments, or supplement
-        distributions grouped by monthly processing period.
-        
-        Tables: 'children', 'assessment', 'supplements'
-        """
-        logger.info(f"Extracting batch for table '{table_name}' for period '{period}'...")
-        
-        if table_name == "children":
-            return [
-                {"id": "c101-uuid", "name": "Aria Stark", "dob": "2024-05-10", "barangay": "Barangay 1", "purok": "Purok A", "gender": "Female"}
-            ]
-        elif table_name == "assessment":
-            return [
-                {"id": "a201-uuid", "child_id": "c101-uuid", "date_measured": "2026-10-14", "weight": 11.5, "height": 80.2, "age_in_months": 29, "hfa_status": "Normal", "wfa_status": "Normal", "wfl_h_status": "Normal"}
-            ]
-        elif table_name == "supplements":
-            return [
-                {"id": "s301-uuid", "child_id": "c101-uuid", "supplement_type": "Vitamin A", "dose_order": 1, "age_in_months": 29, "date_administered": "2026-10-14"}
-            ]
-        else:
-            logger.error(f"Unknown table name: {table_name}")
-            return []
+    def _fetch_rows(
+        self,
+        table_name: str,
+        filters: List[Tuple[str, str]],
+        select: str = "*",
+    ) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        offset = 0
 
-    def validate_extraction(self, extracted_data: List[Dict[str, Any]], expected_count: Optional[int] = None) -> bool:
-        """
-        Check 2 & 3: Record Count Completeness and Required Identifiers Check.
-        """
+        while True:
+            params = [
+                ("select", select),
+                *filters,
+                ("order", "id.asc"),
+                ("limit", str(_PAGE_SIZE)),
+                ("offset", str(offset)),
+            ]
+            response = requests.get(
+                f"{self.rest_url}/{table_name}",
+                headers=self.headers,
+                params=params,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            page = response.json()
+            if not isinstance(page, list) or not all(
+                isinstance(row, dict) for row in page
+            ):
+                raise ValueError(
+                    f"Supabase returned an invalid response for {table_name}"
+                )
+
+            rows.extend(page)
+            if len(page) < _PAGE_SIZE:
+                return rows
+            offset += _PAGE_SIZE
+
+    def extract_batch(
+        self,
+        table_name: str,
+        period: str,
+    ) -> List[Dict[str, Any]]:
+        """Extract records for a month from the configured Supabase project."""
+        if table_name not in _SOURCE_TABLES:
+            raise ValueError(
+                f"Unknown table {table_name!r}; expected one of "
+                f"{', '.join(_SOURCE_TABLES)}"
+            )
+
+        month_start, next_month = _month_bounds(period)
+        source_table, date_column = _SOURCE_TABLES[table_name]
+        if date_column is not None:
+            return self._fetch_rows(
+                source_table,
+                [
+                    (date_column, f"gte.{month_start.isoformat()}"),
+                    (date_column, f"lt.{next_month.isoformat()}"),
+                ],
+            )
+
+        child_ids = {
+            row["child_id"]
+            for source_table, source_date_column in (
+                ("tbl_assessments", "date_measured"),
+                ("tbl_supplements", "date_administered"),
+            )
+            for row in self._fetch_rows(
+                source_table,
+                [
+                    (source_date_column, f"gte.{month_start.isoformat()}"),
+                    (source_date_column, f"lt.{next_month.isoformat()}"),
+                ],
+                select="child_id",
+            )
+            if row.get("child_id")
+        }
+        children: List[Dict[str, Any]] = []
+        sorted_ids = sorted(child_ids)
+        for start in range(0, len(sorted_ids), _CHILD_ID_BATCH_SIZE):
+            batch = sorted_ids[start:start + _CHILD_ID_BATCH_SIZE]
+            children.extend(
+                self._fetch_rows(
+                    "tbl_children",
+                    [("id", f"in.({','.join(batch)})")],
+                )
+            )
+        return children
+
+    def validate_extraction(
+        self,
+        extracted_data: List[Dict[str, Any]],
+        expected_count: Optional[int] = None,
+    ) -> bool:
+        """Check record counts and required identifiers."""
         if expected_count is not None and len(extracted_data) != expected_count:
-            logger.error(f"Record count mismatch: got {len(extracted_data)}, expected {expected_count}")
+            logger.error(
+                "Record count mismatch: got %s, expected %s",
+                len(extracted_data),
+                expected_count,
+            )
             return False
 
         for row in extracted_data:
             if not row.get("id"):
-                logger.error("Validation failed: Found NULL or missing Primary Key (id).")
+                logger.error("Validation failed: missing Primary Key (id).")
                 return False
             if "child_id" in row and not row.get("child_id"):
-                logger.error("Validation failed: Found NULL or missing Foreign Key (child_id).")
+                logger.error("Validation failed: missing Foreign Key (child_id).")
                 return False
 
-        logger.info("Extraction validation passed successfully (0 missing identifiers).")
+        logger.info("Extraction validation passed successfully.")
         return True
+
 
 if __name__ == "__main__":
     extractor = WeighToGoExtractor()
-    extractor.connect()
+    if not extractor.connect():
+        raise SystemExit("Unable to connect to the configured Supabase project.")
     data = extractor.extract_batch("assessment", "October 2026")
     extractor.validate_extraction(data)
-    print("Extracted Data:", data)
+    print(f"Extracted {len(data)} assessment records.")

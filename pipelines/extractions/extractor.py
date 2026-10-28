@@ -1,3 +1,4 @@
+import csv
 import logging
 import os
 from datetime import date, datetime
@@ -18,6 +19,19 @@ _SOURCE_TABLES = {
     "children": ("tbl_children", None),
     "assessment": ("tbl_assessments", "date_measured"),
     "supplements": ("tbl_supplements", "date_administered"),
+}
+_SOURCE_COLUMNS = {
+    "tbl_children": (
+        "id,dob,barangay,purok,gender,is_ip,status,created_at"
+    ),
+    "tbl_assessments": (
+        "id,child_id,date_measured,weight,height,age_in_months,"
+        "wfa_status,hfa_status,wfl_h_status,status,created_at"
+    ),
+    "tbl_supplements": (
+        "id,child_id,supplement_type,dose_order,age_in_months,"
+        "date_administered,status,created_at"
+    ),
 }
 
 
@@ -116,14 +130,17 @@ class WeighToGoExtractor:
         self,
         table_name: str,
         filters: List[Tuple[str, str]],
-        select: str = "*",
+        select: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        selected_columns = select or _SOURCE_COLUMNS.get(table_name)
+        if selected_columns is None:
+            raise ValueError(f"No extraction column contract for {table_name}")
         rows: List[Dict[str, Any]] = []
         offset = 0
 
         while True:
             params = [
-                ("select", select),
+                ("select", selected_columns),
                 *filters,
                 ("order", "id.asc"),
                 ("limit", str(_PAGE_SIZE)),
@@ -170,6 +187,7 @@ class WeighToGoExtractor:
                     (date_column, f"gte.{month_start.isoformat()}"),
                     (date_column, f"lt.{next_month.isoformat()}"),
                 ],
+                select=_SOURCE_COLUMNS[source_table],
             )
 
         child_ids = {
@@ -196,9 +214,33 @@ class WeighToGoExtractor:
                 self._fetch_rows(
                     "tbl_children",
                     [("id", f"in.({','.join(batch)})")],
+                    select=_SOURCE_COLUMNS["tbl_children"],
                 )
             )
         return children
+
+    def save_batch_csv(
+        self,
+        extracted_data: List[Dict[str, Any]],
+        table_name: str,
+        output_filepath: str,
+    ) -> None:
+        """Save extracted rows as CSV using the source table's column order."""
+        if table_name not in _SOURCE_TABLES:
+            raise ValueError(
+                f"Unknown table {table_name!r}; expected one of "
+                f"{', '.join(_SOURCE_TABLES)}"
+            )
+
+        source_table = _SOURCE_TABLES[table_name][0]
+        fieldnames = _SOURCE_COLUMNS[source_table].split(",")
+        output_path = Path(output_filepath)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(extracted_data)
+        logger.info("Saved %s extracted rows to %s", len(extracted_data), output_path)
 
     def validate_extraction(
         self,
@@ -230,6 +272,17 @@ if __name__ == "__main__":
     extractor = WeighToGoExtractor()
     if not extractor.connect():
         raise SystemExit("Unable to connect to the configured Supabase project.")
-    data = extractor.extract_batch("assessment", "October 2026")
-    extractor.validate_extraction(data)
-    print(f"Extracted {len(data)} assessment records.")
+    table_name = "assessment"
+    period = "October 2026"
+    data = extractor.extract_batch(table_name, period)
+    if not extractor.validate_extraction(data):
+        raise SystemExit("Extraction validation failed; CSV was not written.")
+    month_start, _ = _month_bounds(period)
+    output_path = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "extracted"
+        / f"{table_name}_{month_start:%Y-%m}.csv"
+    )
+    extractor.save_batch_csv(data, table_name, str(output_path))
+    print(f"Extracted {len(data)} {table_name} records to {output_path}.")

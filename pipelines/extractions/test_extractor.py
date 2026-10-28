@@ -1,4 +1,7 @@
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -30,7 +33,11 @@ class TestWeighToGoExtractor(unittest.TestCase):
                 "Authorization": "Bearer test-key",
             },
             params=[
-                ("select", "*"),
+                (
+                    "select",
+                    "id,child_id,date_measured,weight,height,age_in_months,"
+                    "wfa_status,hfa_status,wfl_h_status,status,created_at",
+                ),
                 ("date_measured", "gte.2026-10-01"),
                 ("date_measured", "lt.2026-11-01"),
                 ("order", "id.asc"),
@@ -73,6 +80,9 @@ class TestWeighToGoExtractor(unittest.TestCase):
             "/tbl_children",
             mock_get.call_args_list[2].args[0],
         )
+        child_columns = mock_get.call_args_list[2].kwargs["params"][0][1]
+        self.assertNotIn("name", child_columns.split(","))
+        self.assertNotIn("parent_contact", child_columns.split(","))
         self.assertEqual(
             mock_get.call_args_list[2].kwargs["params"][1],
             ("id", "in.(child-1,child-2)"),
@@ -98,7 +108,7 @@ class TestWeighToGoExtractor(unittest.TestCase):
         mock_get.side_effect = [first_page, second_page]
 
         with patch("pipelines.extractions.extractor._PAGE_SIZE", 2):
-            result = self.extractor._fetch_rows("children", [])
+            result = self.extractor._fetch_rows("tbl_children", [])
 
         self.assertEqual(result, [{"id": "1"}, {"id": "2"}, {"id": "3"}])
         self.assertEqual(mock_get.call_args_list[0].kwargs["params"][-1], ("offset", "0"))
@@ -115,6 +125,49 @@ class TestWeighToGoExtractor(unittest.TestCase):
             self.extractor.extract_batch("unknown", "October 2026")
         with self.assertRaises(ValueError):
             self.extractor.extract_batch("assessment", "October")
+
+    def test_saves_extracted_rows_to_csv_with_contract_columns(self):
+        data = [{
+            "id": "assessment-1",
+            "child_id": "child-1",
+            "date_measured": "2026-10-12",
+            "weight": 12.5,
+            "height": 90,
+            "age_in_months": 24,
+            "wfa_status": "NORMAL",
+            "hfa_status": "NORMAL",
+            "wfl_h_status": "NORMAL",
+            "status": "active",
+            "created_at": "2026-10-12T10:00:00+00:00",
+        }]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "nested" / "assessment.csv"
+
+            self.extractor.save_batch_csv(data, "assessment", str(output_path))
+
+            with output_path.open(encoding="utf-8", newline="") as csv_file:
+                reader = csv.DictReader(csv_file)
+                self.assertEqual(
+                    reader.fieldnames,
+                    [
+                        "id", "child_id", "date_measured", "weight", "height",
+                        "age_in_months", "wfa_status", "hfa_status",
+                        "wfl_h_status", "status", "created_at",
+                    ],
+                )
+                self.assertEqual(next(reader)["id"], "assessment-1")
+
+    def test_saves_csv_headers_when_extraction_is_empty(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "assessment.csv"
+
+            self.extractor.save_batch_csv([], "assessment", str(output_path))
+
+            with output_path.open(encoding="utf-8", newline="") as csv_file:
+                reader = csv.reader(csv_file)
+                self.assertEqual(next(reader)[0], "id")
+                self.assertEqual(list(reader), [])
 
 
 if __name__ == "__main__":

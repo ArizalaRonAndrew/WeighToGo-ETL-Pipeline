@@ -1,0 +1,4 @@
+id,child_id,supplement_type,dose_order,age_in_months,date_administered,status,created_at
+eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,11111111-1111-4111-8111-111111111111,Vitamin A,1,32,2026-10-14,active,2026-10-14T12:30:00Z
+ffffffff-ffff-4fff-8fff-ffffffffffff,22222222-2222-4222-8222-222222222222,Deworming,1,36,2026-10-22,active,2026-10-22T12:30:00Z
+99999999-9999-4999-8999-999999999999,33333333-3333-4333-8333-333333333333,Vitamin A,2,21,2026-10-03,active,2026-10-03T12:30:00Z
